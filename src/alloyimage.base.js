@@ -1,7 +1,7 @@
 /**
  * @author:Bin Wang
  * @description: Main
- * @version 
+ * @version
  *
  */
 
@@ -162,7 +162,7 @@ try{
 
         //用worker进行异步处理
         worker: function(func, callback){
-            
+
         },
 
         //对图像进行掩模算子变换
@@ -179,6 +179,17 @@ try{
                 throw new Error("AI_ERROR: 不存在的工具方法_" + actMethod);
             }
         },
+
+        toolkit: function(actMethod){
+            //var actMethod = Array.prototype.shift.call(args);
+
+            if(this.lib.ToolKit[actMethod]){
+                return this.lib.ToolKit[actMethod].process();
+            }else{
+                throw new Error("AI_ERROR: 不存在的工具方法_" + actMethod);
+            }
+        },
+
 
         definePs: function(name, func){
             this.definedPs[name] = func;
@@ -294,7 +305,7 @@ try{
                     })(i);
                 }
             }
-            
+
         }else{
 
             //返回自身构造对象
@@ -328,7 +339,7 @@ try{
 
     //定义使用worker,需要给出alloyimage所在路径
     window[Ps].useWorker = function(path){
-        
+
         //如果不能使用worker，直接降级为单线程
         if(! window.Worker){
             this.useWorker = 0;
@@ -406,13 +417,13 @@ try{
                 this.dorsyWorker.queue.push(["act", method, args]);
 
                 checkStartWorker.call(this);
-                
+
             }else{
                 //做一次转发映射
                 P.reflect(method, this.imgData, args);
 
             }
-            
+
             return this;
         },
 
@@ -481,7 +492,7 @@ try{
 
         //显示对象 isFast用于快速显示
         show: function(selector, isFast, flag){
-            
+
             if(flag){
             }else{
                 if(this.useWorker){
@@ -572,7 +583,7 @@ try{
 
         //合并一个AlloyImage图层上去
         add: function(){
-            
+
             var numberArr = [], psLibObj, method, alpha, dx, dy, isFast, channel;
 
             //做重载
@@ -694,7 +705,7 @@ try{
             //如果没有挂接图片 直接返回
             if(! this.layers.length){
                 this.context.putImageData(this.imgData, 0, 0);
-                return this.canvas.toDataURL(mimeType, comRatio); 
+                return this.canvas.toDataURL(mimeType, comRatio);
             }
 
 
@@ -719,7 +730,7 @@ try{
             //以临时对象data显示
             this.context.putImageData(tempPsLib.imgData, 0, 0);
 
-            return this.canvas.toDataURL(mimeType, comRatio); 
+            return this.canvas.toDataURL(mimeType, comRatio);
         },
 
         //下载图片
@@ -804,7 +815,7 @@ try{
                     for(var x = 0; x < width; x ++){
                         var i = y * width + x;
                         var dot0 = i * 4;
-                        
+
                         for(var j = 0; j < 3; j ++){
                             if(indexOfArr[j]){
                                 if(! result[j][data[dot0 + j]]){
@@ -840,9 +851,9 @@ try{
                 for(var i = 0; i < 255; i ++){
                     var currY = result[i] || 0;
                     currY = canvas.height - currY / max * 0.8 * canvas.height;
-                    context.lineTo(i / 256 * canvas.width, currY); 
+                    context.lineTo(i / 256 * canvas.width, currY);
                 }
-                
+
                 context.lineTo(canvas.width + 10, canvas.height);
                 context.closePath();
 
@@ -939,7 +950,7 @@ try{
             var transformedPoint = [];
             // 构建一个新的2*2矩阵用来盛放变换之后的四顶点坐标
             var transformMatrix = new dM.Matrix(matrix, "2*2");
-            
+
             //计算原有点变换后的点
             for(var i = 0; i < originPoint.length; i ++){
                 transformedPoint.push(originPoint[i].mutiply(transformMatrix));
@@ -1077,7 +1088,7 @@ try{
         //裁切
         clip: function(sx, sy, w, h){
             // @todo 多图层挂接支持
-            
+
             //将图像信息放置于临时canvas上
             this.ctxContext.putImageData(this.imgData, 0, 0);
 
@@ -1093,6 +1104,13 @@ try{
         //图像的工具方法 不会返回AI本身
         Tools: function(args){
             return P.tools(this.imgData, arguments);
+        },
+
+        //图像的工具箱方法，如钢笔工具，毛笔等。
+        //考虑是否支持组合使用？
+        ToolKit:function(actMethod) {
+            P.toolkit(actMethod);
+            return this;
         }
     };
 
