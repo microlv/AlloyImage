@@ -11,7 +11,9 @@ Array.prototype.del = function(arr){
 
     //对数组重新排序
     //Sort array
-    arr.sort();
+    arr.sort(function(a, b){
+        return a - b;
+    });
 
     //复制数组，防止污染
     //Clone array in case of being modified
@@ -417,17 +419,83 @@ try{
         },
 
         //预览模式 ，所有的再操作全部基于原点，不会改变本图层的效果，直到act会去除这部分图层
+        // view一般只是对单图层来说的
+        // 暂时只考虑单图层
         view: function(method, arg1, arg2, arg3, arg4){
+            if(! method){
+                this.cancel();
+            }else{
+                var n = this.layers.length;
 
-            //克隆本图层对象
-            var newLayer = this.clone();
+                if(this.layers[n - 1] && this.layers[n - 1][0].type === 1){
+                    this.cancel();
+                }
 
-            //标记本图层的种类为预览的已合并的图层
-            newLayer.type = 1;
+                var newLayer;
+                for(var i = this.layers.length - 1; i > -1; i --){
+                    var layer = this.layers[i];
 
-            //挂接克隆图层副本到对象
-            this.addLayer(newLayer, "正常", 0, 0);
-            newLayer.act(method, arg1, arg2, arg3, arg4);
+                    if(layer[0].type === 2){
+                        newLayer = layer[0].clone();
+
+                        break;
+                    }
+                }
+
+                if(! newLayer){
+                    //克隆本图层对象
+                    newLayer = this.clone();
+
+                    window.newLayer = newLayer;
+                }
+
+
+                if(method === "ps"){
+                    newLayer = newLayer.ps(arg1, arg2, arg3, arg4);
+                }else{
+                    newLayer.act(method, arg1, arg2, arg3, arg4);
+                }
+
+                //标记本图层的种类为预览的已合并的图层
+                newLayer.type = 1;
+
+                //挂接克隆图层副本到对象
+                this.addLayer(newLayer, "正常", 0, 0);
+            }
+
+            return this;
+        },
+
+        // 暂时保存view的执行结果
+        // 与excute区别是可以撤销 复原
+        doView: function(){
+            var n = this.layers.length;
+
+            if(this.layers[n - 1] && this.layers[n - 1][0].type === 2){
+                return this;
+            }
+
+            if(this.layers[n - 1] && this.layers[n - 1][0].type === 1){
+                // 保存图层
+                this.layers[n - 1][0].type = 2;
+            }
+
+            return this;
+        },
+
+        // 撤销至上次的状态
+        undoView: function(){
+            this.cancel();
+
+            for(var i = this.layers.length - 1; i > -1; i --){
+                var layer = this.layers[i];
+
+                if(layer[0].type === 2){
+                    layer[0].type = 1;
+
+                    break;
+                }
+            }
 
             return this;
         },
@@ -440,6 +508,8 @@ try{
                 this.imgData = layers[n - 1][0].imgData;
                 delete layers[n - 1];
             }
+
+            return this;
         },
 
         //取消view的结果执行
@@ -447,11 +517,13 @@ try{
             var layers = this.layers;
             var n = layers.length;
             if(layers[n - 1] && layers[n - 1][0].type == 1){
-                delete layers[n - 1];
+                layers.pop();
             }
+
+            return this;
         },
 
-        complileLayers: function(){
+        complileLayers: function(isFast){
            //如果其上无其他挂载图层，加快处理
             if(this.layers.length == 0){
                 this.tempPsLib = {
@@ -490,7 +562,7 @@ try{
                 }
             }
 
-            this.complileLayers();
+            this.complileLayers(isFast);
 
             /*
             //如果其上无其他挂载图层，加快处理
@@ -632,6 +704,7 @@ try{
             return this;
         },
 
+        // 克隆只对单图层有效
         clone: function(workerFlag){
 
             /*
@@ -691,33 +764,10 @@ try{
                 }
             }
 
-            //如果没有挂接图片 直接返回
-            if(! this.layers.length){
-                this.context.putImageData(this.imgData, 0, 0);
-                return this.canvas.toDataURL(mimeType, comRatio); 
-            }
-
-
-            //创建一个临时的psLib对象，防止因为合并显示对本身imgData影响
-            var tempPsLib = new window[Ps](this.canvas.width, this.canvas.height);
-            tempPsLib.add(this, "正常", 0, 0, isFast);
-            this.tempPsLib = tempPsLib;
-
-            //将挂接到本对象上的图层对象 一起合并到临时的psLib对象上去 用于显示合并的结果，不会影响每个图层，包括本图层
-            for(var i = 0; i < this.layers.length; i ++){
-                var tA = this.layers[i];
-                var layers = tA[0].layers;
-                var currLayer = tA[0];
-
-                if(layers[layers.length - 1] && layers[layers.length - 1][0].type == 1) currLayer = layers[layers.length - 1][0];
-
-                tempPsLib.add(currLayer, tA[1], tA[2], tA[3], isFast);
-            }
-
-            this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.complileLayers();
 
             //以临时对象data显示
-            this.context.putImageData(tempPsLib.imgData, 0, 0);
+            this.context.putImageData(this.tempPsLib.imgData, 0, 0);
 
             return this.canvas.toDataURL(mimeType, comRatio); 
         },
@@ -991,6 +1041,15 @@ try{
             this.height = height;
 
             this.imgData = tempCtx.getImageData(0, 0, width, height);
+
+            // 对预览图层也进行控制
+            for(var i = this.layers.length - 1; i > -1; i --){
+                var layer = this.layers[i];
+
+                if(layer[0].type === 2 || layer[0].type === 1){
+                    layer[0].transform(matrix, x0, y0);
+                }
+            }
 
             return this;
         },
