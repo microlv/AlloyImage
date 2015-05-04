@@ -11,7 +11,9 @@ Array.prototype.del = function(arr){
 
     //对数组重新排序
     //Sort array
-    arr.sort();
+    arr.sort(function(a, b){
+        return a - b;
+    });
 
     //复制数组，防止污染
     //Clone array in case of being modified
@@ -417,17 +419,83 @@ try{
         },
 
         //预览模式 ，所有的再操作全部基于原点，不会改变本图层的效果，直到act会去除这部分图层
+        // view一般只是对单图层来说的
+        // 暂时只考虑单图层
         view: function(method, arg1, arg2, arg3, arg4){
+            if(! method){
+                this.cancel();
+            }else{
+                var n = this.layers.length;
 
-            //克隆本图层对象
-            var newLayer = this.clone();
+                if(this.layers[n - 1] && this.layers[n - 1][0].type === 1){
+                    this.cancel();
+                }
 
-            //标记本图层的种类为预览的已合并的图层
-            newLayer.type = 1;
+                var newLayer;
+                for(var i = this.layers.length - 1; i > -1; i --){
+                    var layer = this.layers[i];
 
-            //挂接克隆图层副本到对象
-            this.addLayer(newLayer, "正常", 0, 0);
-            newLayer.act(method, arg1, arg2, arg3, arg4);
+                    if(layer[0].type === 2){
+                        newLayer = layer[0].clone();
+
+                        break;
+                    }
+                }
+
+                if(! newLayer){
+                    //克隆本图层对象
+                    newLayer = this.clone();
+
+                    window.newLayer = newLayer;
+                }
+
+
+                if(method === "ps"){
+                    newLayer = newLayer.ps(arg1, arg2, arg3, arg4);
+                }else{
+                    newLayer.act(method, arg1, arg2, arg3, arg4);
+                }
+
+                //标记本图层的种类为预览的已合并的图层
+                newLayer.type = 1;
+
+                //挂接克隆图层副本到对象
+                this.addLayer(newLayer, "正常", 0, 0);
+            }
+
+            return this;
+        },
+
+        // 暂时保存view的执行结果
+        // 与excute区别是可以撤销 复原
+        doView: function(){
+            var n = this.layers.length;
+
+            if(this.layers[n - 1] && this.layers[n - 1][0].type === 2){
+                return this;
+            }
+
+            if(this.layers[n - 1] && this.layers[n - 1][0].type === 1){
+                // 保存图层
+                this.layers[n - 1][0].type = 2;
+            }
+
+            return this;
+        },
+
+        // 撤销至上次的状态
+        undoView: function(){
+            this.cancel();
+
+            for(var i = this.layers.length - 1; i > -1; i --){
+                var layer = this.layers[i];
+
+                if(layer[0].type === 2){
+                    layer[0].type = 1;
+
+                    break;
+                }
+            }
 
             return this;
         },
@@ -440,6 +508,8 @@ try{
                 this.imgData = layers[n - 1][0].imgData;
                 delete layers[n - 1];
             }
+
+            return this;
         },
 
         //取消view的结果执行
@@ -447,11 +517,13 @@ try{
             var layers = this.layers;
             var n = layers.length;
             if(layers[n - 1] && layers[n - 1][0].type == 1){
-                delete layers[n - 1];
+                layers.pop();
             }
+
+            return this;
         },
 
-        complileLayers: function(){
+        complileLayers: function(isFast){
            //如果其上无其他挂载图层，加快处理
             if(this.layers.length == 0){
                 this.tempPsLib = {
@@ -490,7 +562,7 @@ try{
                 }
             }
 
-            this.complileLayers();
+            this.complileLayers(isFast);
 
             /*
             //如果其上无其他挂载图层，加快处理
@@ -632,6 +704,7 @@ try{
             return this;
         },
 
+        // 克隆只对单图层有效
         clone: function(workerFlag){
 
             /*
@@ -691,33 +764,10 @@ try{
                 }
             }
 
-            //如果没有挂接图片 直接返回
-            if(! this.layers.length){
-                this.context.putImageData(this.imgData, 0, 0);
-                return this.canvas.toDataURL(mimeType, comRatio); 
-            }
-
-
-            //创建一个临时的psLib对象，防止因为合并显示对本身imgData影响
-            var tempPsLib = new window[Ps](this.canvas.width, this.canvas.height);
-            tempPsLib.add(this, "正常", 0, 0, isFast);
-            this.tempPsLib = tempPsLib;
-
-            //将挂接到本对象上的图层对象 一起合并到临时的psLib对象上去 用于显示合并的结果，不会影响每个图层，包括本图层
-            for(var i = 0; i < this.layers.length; i ++){
-                var tA = this.layers[i];
-                var layers = tA[0].layers;
-                var currLayer = tA[0];
-
-                if(layers[layers.length - 1] && layers[layers.length - 1][0].type == 1) currLayer = layers[layers.length - 1][0];
-
-                tempPsLib.add(currLayer, tA[1], tA[2], tA[3], isFast);
-            }
-
-            this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.complileLayers();
 
             //以临时对象data显示
-            this.context.putImageData(tempPsLib.imgData, 0, 0);
+            this.context.putImageData(this.tempPsLib.imgData, 0, 0);
 
             return this.canvas.toDataURL(mimeType, comRatio); 
         },
@@ -928,7 +978,7 @@ try{
             //意味着图层自身所有的变换都不会丢失自己的图像信息 但会原点位置发生变化
             //这样做会节省很大的无图像空间
 
-            //计算原有点变换后的点
+            // 记录原始图像的四顶点坐标
             var originPoint = [
                 new dM.Matrix([0, 0], "1*2"),
                 new dM.Matrix([0, this.canvas.height], "1*2"),
@@ -937,8 +987,10 @@ try{
             ];
 
             var transformedPoint = [];
+            // 构建一个新的2*2矩阵用来盛放变换之后的四顶点坐标
             var transformMatrix = new dM.Matrix(matrix, "2*2");
-
+            
+            //计算原有点变换后的点
             for(var i = 0; i < originPoint.length; i ++){
                 transformedPoint.push(originPoint[i].mutiply(transformMatrix));
             }
@@ -989,6 +1041,15 @@ try{
             this.height = height;
 
             this.imgData = tempCtx.getImageData(0, 0, width, height);
+
+            // 对预览图层也进行控制
+            for(var i = this.layers.length - 1; i > -1; i --){
+                var layer = this.layers[i];
+
+                if(layer[0].type === 2 || layer[0].type === 1){
+                    layer[0].transform(matrix, x0, y0);
+                }
+            }
 
             return this;
         },
@@ -1560,7 +1621,7 @@ window.AlloyImage = window.$AI = window.psLib;
                     };
 
                 }else{
-                    P.destroySelf("AI_ERROR:调用AI不存在的方法" + method);
+                    throw new Error("AI_ERROR:调用AI不存在的方法" + method);
                 }
             },
 
@@ -2595,356 +2656,30 @@ window.AlloyImage = window.$AI = window.psLib;
 })("psLib");
 /**
  * @author: Bin Wang
- * @description: 调整亮度对比度
+ * @description:灰度扩展
  *
  */
 ;(function(Ps){
 
-    window[Ps].module("Alteration.brightness",function(P){
+    window[Ps].module("Filter.ImageEnhance",function(P){
 
         var M = {
-            //调节亮度对比度
-            process: function(imgData, args){
+            process: function(imgData,arg1,arg2){
+                var lamta = arg || 0.5;
                 var data = imgData.data;
-                var brightness = args[0] / 50;// -1,1
-                var arg2 = args[1] || 0;
-                var c = arg2 / 50;// -1,1
-                var k = Math.tan((45 + 44 * c) * Math.PI / 180);
+                var width = imgData.width;
+                var height = imgData.height;
+                var p1 = arg1 || {x: 10,y: 10};
+                var p2 = arg2 || {x: 50,y: 40};
+
+                function transfer(d){
+                }
 
                 for(var i = 0,n = data.length;i < n;i += 4){
-                    for(var j = 0;j < 3;j ++){
-                        data[i + j] = (data[i + j] - 127.5 * (1 - brightness)) * k + 127.5 * (1 + brightness);
-                    }
+                    
                 }
 
-                return imgData;
-            }
-        };
-
-        return M;
-
-    });
-
-})("psLib");
-/**
- * @author: Bin Wang
- * @description:    曲线 
- *
- */
-;(function(Ps){
-
-    window[Ps].module("Alteration.curve", function(P){
-
-        var M = {
-            process: function(imgData, arg){
-                /*
-                 * arg   arg[0] = [3,3] ,arg[1]  = [2,2]
-                 * */
-
-                //获得插值函数
-                var f = P.lib.dorsyMath.lagrange(arg[0], arg[1]);
-                var data = imgData.data;
-                var width = imgData.width;
-                var height = imgData.height;
-
-                //调节通道
-                var channel = arg[2];
-                if(!(/[RGB]+/.test(channel))){
-                    channel = "RGB";
-                }
-                
-                var channelString = channel.replace("R","0").replace("G","1").replace("B","2");
-                
-                var indexOfArr = [
-                    channelString.indexOf("0") > -1,
-                    channelString.indexOf("1") > -1,
-                    channelString.indexOf("2") > -1
-                ];
-
-                //区块
-                for(var x = 0; x < width; x ++){
-
-                    for(var y = 0; y < height; y ++){
-                        
-                        var realI = y * width + x;
-
-                        for(var j = 0; j < 3; j ++){
-                            if(! indexOfArr[j]) continue;
-                            data[realI * 4 + j] = f(data[realI * 4 + j]);
-                        }
-
-                    }
-
-                }
-
-                return imgData;
-            }
-        };
-
-        return M;
-
-    });
-
-})("psLib");
-/**
- * @author: Bin Wang
- * @description: gamma调节
- *
- */
-;(function(Ps){
-
-    window[Ps].module("Alteration.gamma",function(P){
-
-        var M = {
-            process: function(imgData, args){
-                var dM = P.lib.dorsyMath;
-                var data = imgData.data;
-                var width = imgData.width;
-                var height = imgData.height;
-
-                //gamma阶-100， 100
-                var gamma;
-
-                if(args[0] == undefined) gamma = 10;
-                else gamma = args[0];
-
-                var normalizedArg = ((gamma + 100) / 200) * 2;
-                
-                for(var x = 0; x < width; x ++){
-                    for(var y = 0; y < height; y ++){
-                        dM.xyCal(imgData, x, y, function(r, g, b){
-                            return [
-                                Math.pow(r, normalizedArg),
-                                Math.pow(g, normalizedArg),
-                                Math.pow(b, normalizedArg)
-                            ];
-                        });
-                    }
-                }
-                return imgData;
-            }
-        };
-
-        return M;
-
-    });
-
-})("psLib");
-/**
- * @author: Bin Wang
- * @description:  可选颜色 
- * @参考：http://wenku.baidu.com/view/e32d41ea856a561252d36f0b.html
- *
- */
-;(function(Ps){
-
-    window[Ps].module("Alteration.selectiveColor",function(P){
-
-        var M = {
-            process: function(imgData, arg){//调节亮度对比度
-                //选择的颜色
-                var color = arg[0];
-
-                //百分数
-                var C = arg[1];
-                var M = arg[2];
-                var Y = arg[3];
-                var K = arg[4];
-
-                //是否相对
-                var isRelative = arg[5] || 0;
-
-                var maxColorMap = {
-                    red: "R",
-                    green: "G",
-                    blue: "B",
-                    "红色": "R",
-                    "绿色": "G",
-                    "蓝色": "B"
-                };
-
-                var minColorMap = {
-                    cyan: "R",
-                    magenta: "G",
-                    yellow: "B",
-                    "青色": "R",
-                    "洋红": "G",
-                    "黄色": "B"
-                };
-
-                //检查是否是被选中的颜色
-                var checkSelectedColor = function(colorObj){
-                    if(maxColorMap[color]){
-                        return Math.max(colorObj.R, colorObj.G, colorObj.B) == colorObj[maxColorMap[color]];
-                    }else if(minColorMap[color]){
-                        return Math.min(colorObj.R, colorObj.G, colorObj.B) == colorObj[minColorMap[color]];
-                    }else if(color == "black" || color == "黑色"){
-                        return Math.min(colorObj.R, colorObj.G, colorObj.B) < 128;
-                    }else if(color == "white" || color == "白色"){
-                        return Math.max(colorObj.R, colorObj.G, colorObj.B) > 128;
-                    }else if(color == "中性色"){
-                        return ! ((Math.max(colorObj.R, colorObj.G, colorObj.B) < 1) || (Math.min(colorObj.R, colorObj.G, colorObj.B) > 224));
-                    }
-                };
-
-                var upLimit = 0;
-                var lowLimit = 0;
-                var limit = 0;
-
-                var alterNum = [C, M, Y, K];
-                for(var x = 0, w = imgData.width; x < w; x ++){
-                    for(var y = 0, h = imgData.height; y < h; y ++){
-                        P.lib.dorsyMath.xyCal(imgData, x, y, function(R, G, B){
-                            var colorObj = {
-                                R: R,
-                                G: G,
-                                B: B
-                            };
-
-                            var colorArr = [R, G, B];
-                            var resultArr =[];
-
-                            if(checkSelectedColor(colorObj)){
-                                if(maxColorMap[color]){
-                                    var maxColor = maxColorMap[color];
-
-                                    var middleValue = R + G + B - Math.max(R, G, B) - Math.min(R, G, B);
-                                    limit = colorObj[maxColor] - middleValue;
-                                }else if(minColorMap[color]){
-                                    var minColor = minColorMap[color];
-
-                                    var middleValue = R + G + B - Math.max(R, G, B) - Math.min(R, G, B);
-                                    limit = middleValue - colorObj[minColor]  ;
-                                }else if(color == "black" || color == "黑色"){
-                                    limit = parseInt(127.5 - Math.max(R, G, B)) * 2;
-                                }else if(color == "white" || color == "白色"){
-                                    limit = parseInt(Math.min(R, G, B) - 127.5) * 2;
-                                }else if(color == "中性色"){
-                                    limit = 255 - (Math.abs(Math.max(R, G, B) - 127.5) + Math.abs(Math.min(R, G, B) - 127.5));
-                                }else{
-                                    return;
-                                }
-
-                                for(var i = 0; i < 3; i ++){
-                                    //可减少到的量
-                                    var lowLimitDelta = parseInt(limit * (colorArr[i] / 255));
-                                    var lowLimit = colorArr[i] - lowLimitDelta;
-
-                                    //可增加到的量
-                                    var upLimitDelta =  parseInt(limit * (1 - colorArr[i] / 255));
-                                    var upLimit = colorArr[i] + upLimitDelta;
-
-                                    //将黑色算进去 得到影响百分比因子
-                                    var factor = (alterNum[i] + K + alterNum[i] * K);
-
-                                    //相对调节
-                                    if(isRelative){
-                                        //如果分量大于128  减少量=增加量
-                                        if(colorArr[i] > 128){
-                                            lowLimitDelta = upLimitDelta;
-                                        }
-
-                                        //先算出黑色导致的原始增量
-                                        if(K > 0){
-                                            var realUpLimit = colorArr[i] - K * lowLimitDelta; 
-                                        }else{
-                                            var realUpLimit = colorArr[i] - K * upLimitDelta; 
-                                        }
-
-                                        //标准化
-                                        if(realUpLimit > upLimit) realUpLimit = upLimit;
-                                        if(realUpLimit < lowLimit) realUpLimit = lowLimit;
-
-                                        upLimitDelta = upLimit - realUpLimit;
-                                        lowLimitDelta = realUpLimit - lowLimit;
-
-                                        if(K < 0){
-                                            lowLimitDelta = upLimitDelta;
-                                        }else{
-                                        }
-
-                                        //> 0表明在减少
-                                        if(alterNum[i] > 0){
-                                            realUpLimit -= alterNum[i] * lowLimitDelta; 
-                                        }else{
-                                            realUpLimit -= alterNum[i] * upLimitDelta; 
-                                        }
-
-
-                                    }else{
-
-                                        //现在量
-                                        var realUpLimit = limit * - factor + colorArr[i];
-
-                                    }
-
-                                    if(realUpLimit > upLimit) realUpLimit = upLimit;
-                                    if(realUpLimit < lowLimit) realUpLimit = lowLimit;
-                                    
-                                    resultArr[i] = realUpLimit;
-                                }
-
-                                return resultArr;
-                            }
-                        });//end xyCal
-                    }//end forY
-                }//end forX
-
-                return imgData;
-
-            }//end process Method
-        };//end M defination
-
-        return M;
-    });
-
-})("psLib");
-/**
- * @author: Bin Wang
- * @description: 调整RGB 饱和和度  
- * H (-2*Math.PI , 2 * Math.PI)  S (-100,100) I (-100,100)
- * 着色原理  勾选着色后，所有的像素不管之前是什么色相，都变成当前设置的色相，
- * 然后饱和度变成现在设置的饱和度，但保持明度为原来的基础上加上设置的明度
- *
- */
-;(function(Ps){
-
-    window[Ps].module("Alteration.setHSI",function(P){
-
-        var M = {
-            process: function(imgData,arg){//调节亮度对比度
-                arg[0] = arg[0] / 180 * Math.PI;
-                arg[1] = arg[1] / 100 || 0;
-                arg[2] = arg[2] / 100 * 255 || 0;
-                arg[3] = arg[3] || false;//着色
-                
-                //调节通道
-                var channel = arg[4];
-                if(!(/[RGBCMY]+/.test(channel))){
-                    channel = "RGBCMY";
-                }
-                
-                var letters = channel.split("");
-                var indexOf = {};
-
-                for(var i = 0; i < letters.length; i ++){
-                    indexOf[letters[i]] = 1;
-                }
-
-                P.lib.dorsyMath.applyInHSI(imgData,function(i, color){
-                    if(! indexOf[color]) return;
-
-                    if(arg[3]){
-                        i.H = arg[0];
-                        i.S = arg[1];
-                        i.I += arg[2];
-                    }else{
-                        i.H += arg[0];
-                        i.S += arg[1];
-                        i.I += arg[2];
-                    }
-
-                });
+                imgData.data = data;
 
                 return imgData;
             }
@@ -3218,7 +2953,7 @@ window.AlloyImage = window.$AI = window.psLib;
              * @param  {Number} sigma 标准方差, 可选, 默认取值为 radius / 3
              * @return {Array}
              */
-            process: function(imgData,radius, sigma) {
+            process: function(imgData, args) {
                 var pixes = imgData.data;
                 var width = imgData.width;
                 var height = imgData.height;
@@ -3227,6 +2962,9 @@ window.AlloyImage = window.$AI = window.psLib;
                     x, y,
                     r, g, b, a,
                     i, j, k, len;
+
+                var radius = args[0];
+                var sigma = args[1];
 
 
                 radius = Math.floor(radius) || 3;
@@ -3299,42 +3037,6 @@ window.AlloyImage = window.$AI = window.psLib;
                 }
                 //end
                 imgData.data = pixes;
-                return imgData;
-            }
-        };
-
-        return M;
-
-    });
-
-})("psLib");
-/**
- * @author: Bin Wang
- * @description:灰度扩展
- *
- */
-;(function(Ps){
-
-    window[Ps].module("Filter.ImageEnhance",function(P){
-
-        var M = {
-            process: function(imgData,arg1,arg2){
-                var lamta = arg || 0.5;
-                var data = imgData.data;
-                var width = imgData.width;
-                var height = imgData.height;
-                var p1 = arg1 || {x: 10,y: 10};
-                var p2 = arg2 || {x: 50,y: 40};
-
-                function transfer(d){
-                }
-
-                for(var i = 0,n = data.length;i < n;i += 4){
-                    
-                }
-
-                imgData.data = data;
-
                 return imgData;
             }
         };
@@ -3728,6 +3430,368 @@ window.AlloyImage = window.$AI = window.psLib;
                 }
 
                 imgData.data = data;
+
+                return imgData;
+            }
+        };
+
+        return M;
+
+    });
+
+})("psLib");
+/**
+ * @author: Bin Wang
+ * @description: 调整亮度对比度
+ *
+ */
+;(function(Ps){
+
+    window[Ps].module("Alteration.brightness",function(P){
+
+        var M = {
+            //调节亮度对比度
+            process: function(imgData, args){
+                var data = imgData.data;
+                var brightness = args[0] / 50;// -1,1
+                var arg2 = args[1] || 0;
+                var c = arg2 / 50;// -1,1
+                var k = Math.tan((45 + 44 * c) * Math.PI / 180);
+
+                for(var i = 0,n = data.length;i < n;i += 4){
+                    for(var j = 0;j < 3;j ++){
+                        data[i + j] = (data[i + j] - 127.5 * (1 - brightness)) * k + 127.5 * (1 + brightness);
+                    }
+                }
+
+                return imgData;
+            }
+        };
+
+        return M;
+
+    });
+
+})("psLib");
+/**
+ * @author: Bin Wang
+ * @description:    曲线 
+ *
+ */
+;(function(Ps){
+
+    window[Ps].module("Alteration.curve", function(P){
+
+        var M = {
+            process: function(imgData, arg){
+                /*
+                 * arg   arg[0] = [3,3] ,arg[1]  = [2,2]
+                 * */
+
+                //获得插值函数
+                var f = P.lib.dorsyMath.lagrange(arg[0], arg[1]);
+                var data = imgData.data;
+                var width = imgData.width;
+                var height = imgData.height;
+
+                //调节通道
+                var channel = arg[2];
+                if(!(/[RGB]+/.test(channel))){
+                    channel = "RGB";
+                }
+                
+                var channelString = channel.replace("R","0").replace("G","1").replace("B","2");
+                
+                var indexOfArr = [
+                    channelString.indexOf("0") > -1,
+                    channelString.indexOf("1") > -1,
+                    channelString.indexOf("2") > -1
+                ];
+
+                //区块
+                for(var x = 0; x < width; x ++){
+
+                    for(var y = 0; y < height; y ++){
+                        
+                        var realI = y * width + x;
+
+                        for(var j = 0; j < 3; j ++){
+                            if(! indexOfArr[j]) continue;
+                            data[realI * 4 + j] = f(data[realI * 4 + j]);
+                        }
+
+                    }
+
+                }
+
+                return imgData;
+            }
+        };
+
+        return M;
+
+    });
+
+})("psLib");
+/**
+ * @author: Bin Wang
+ * @description: gamma调节
+ *
+ */
+;(function(Ps){
+
+    window[Ps].module("Alteration.gamma",function(P){
+
+        var M = {
+            process: function(imgData, args){
+                var dM = P.lib.dorsyMath;
+                var data = imgData.data;
+                var width = imgData.width;
+                var height = imgData.height;
+
+                //gamma阶-100， 100
+                var gamma;
+
+                if(args[0] == undefined) gamma = 10;
+                else gamma = args[0];
+
+                var normalizedArg = ((gamma + 100) / 200) * 2;
+                
+                for(var x = 0; x < width; x ++){
+                    for(var y = 0; y < height; y ++){
+                        dM.xyCal(imgData, x, y, function(r, g, b){
+                            return [
+                                Math.pow(r, normalizedArg),
+                                Math.pow(g, normalizedArg),
+                                Math.pow(b, normalizedArg)
+                            ];
+                        });
+                    }
+                }
+                return imgData;
+            }
+        };
+
+        return M;
+
+    });
+
+})("psLib");
+/**
+ * @author: Bin Wang
+ * @description:  可选颜色 
+ * @参考：http://wenku.baidu.com/view/e32d41ea856a561252d36f0b.html
+ *
+ */
+;(function(Ps){
+
+    window[Ps].module("Alteration.selectiveColor",function(P){
+
+        var M = {
+            process: function(imgData, arg){//调节亮度对比度
+                //选择的颜色
+                var color = arg[0];
+
+                //百分数
+                var C = arg[1];
+                var M = arg[2];
+                var Y = arg[3];
+                var K = arg[4];
+
+                //是否相对
+                var isRelative = arg[5] || 0;
+
+                var maxColorMap = {
+                    red: "R",
+                    green: "G",
+                    blue: "B",
+                    "红色": "R",
+                    "绿色": "G",
+                    "蓝色": "B"
+                };
+
+                var minColorMap = {
+                    cyan: "R",
+                    magenta: "G",
+                    yellow: "B",
+                    "青色": "R",
+                    "洋红": "G",
+                    "黄色": "B"
+                };
+
+                //检查是否是被选中的颜色
+                var checkSelectedColor = function(colorObj){
+                    if(maxColorMap[color]){
+                        return Math.max(colorObj.R, colorObj.G, colorObj.B) == colorObj[maxColorMap[color]];
+                    }else if(minColorMap[color]){
+                        return Math.min(colorObj.R, colorObj.G, colorObj.B) == colorObj[minColorMap[color]];
+                    }else if(color == "black" || color == "黑色"){
+                        return Math.min(colorObj.R, colorObj.G, colorObj.B) < 128;
+                    }else if(color == "white" || color == "白色"){
+                        return Math.max(colorObj.R, colorObj.G, colorObj.B) > 128;
+                    }else if(color == "中性色"){
+                        return ! ((Math.max(colorObj.R, colorObj.G, colorObj.B) < 1) || (Math.min(colorObj.R, colorObj.G, colorObj.B) > 224));
+                    }
+                };
+
+                var upLimit = 0;
+                var lowLimit = 0;
+                var limit = 0;
+
+                var alterNum = [C, M, Y, K];
+                for(var x = 0, w = imgData.width; x < w; x ++){
+                    for(var y = 0, h = imgData.height; y < h; y ++){
+                        P.lib.dorsyMath.xyCal(imgData, x, y, function(R, G, B){
+                            var colorObj = {
+                                R: R,
+                                G: G,
+                                B: B
+                            };
+
+                            var colorArr = [R, G, B];
+                            var resultArr =[];
+
+                            if(checkSelectedColor(colorObj)){
+                                if(maxColorMap[color]){
+                                    var maxColor = maxColorMap[color];
+
+                                    var middleValue = R + G + B - Math.max(R, G, B) - Math.min(R, G, B);
+                                    limit = colorObj[maxColor] - middleValue;
+                                }else if(minColorMap[color]){
+                                    var minColor = minColorMap[color];
+
+                                    var middleValue = R + G + B - Math.max(R, G, B) - Math.min(R, G, B);
+                                    limit = middleValue - colorObj[minColor]  ;
+                                }else if(color == "black" || color == "黑色"){
+                                    limit = parseInt(127.5 - Math.max(R, G, B)) * 2;
+                                }else if(color == "white" || color == "白色"){
+                                    limit = parseInt(Math.min(R, G, B) - 127.5) * 2;
+                                }else if(color == "中性色"){
+                                    limit = 255 - (Math.abs(Math.max(R, G, B) - 127.5) + Math.abs(Math.min(R, G, B) - 127.5));
+                                }else{
+                                    return;
+                                }
+
+                                for(var i = 0; i < 3; i ++){
+                                    //可减少到的量
+                                    var lowLimitDelta = parseInt(limit * (colorArr[i] / 255));
+                                    var lowLimit = colorArr[i] - lowLimitDelta;
+
+                                    //可增加到的量
+                                    var upLimitDelta =  parseInt(limit * (1 - colorArr[i] / 255));
+                                    var upLimit = colorArr[i] + upLimitDelta;
+
+                                    //将黑色算进去 得到影响百分比因子
+                                    var factor = (alterNum[i] + K + alterNum[i] * K);
+
+                                    //相对调节
+                                    if(isRelative){
+                                        //如果分量大于128  减少量=增加量
+                                        if(colorArr[i] > 128){
+                                            lowLimitDelta = upLimitDelta;
+                                        }
+
+                                        //先算出黑色导致的原始增量
+                                        if(K > 0){
+                                            var realUpLimit = colorArr[i] - K * lowLimitDelta; 
+                                        }else{
+                                            var realUpLimit = colorArr[i] - K * upLimitDelta; 
+                                        }
+
+                                        //标准化
+                                        if(realUpLimit > upLimit) realUpLimit = upLimit;
+                                        if(realUpLimit < lowLimit) realUpLimit = lowLimit;
+
+                                        upLimitDelta = upLimit - realUpLimit;
+                                        lowLimitDelta = realUpLimit - lowLimit;
+
+                                        if(K < 0){
+                                            lowLimitDelta = upLimitDelta;
+                                        }else{
+                                        }
+
+                                        //> 0表明在减少
+                                        if(alterNum[i] > 0){
+                                            realUpLimit -= alterNum[i] * lowLimitDelta; 
+                                        }else{
+                                            realUpLimit -= alterNum[i] * upLimitDelta; 
+                                        }
+
+
+                                    }else{
+
+                                        //现在量
+                                        var realUpLimit = limit * - factor + colorArr[i];
+
+                                    }
+
+                                    if(realUpLimit > upLimit) realUpLimit = upLimit;
+                                    if(realUpLimit < lowLimit) realUpLimit = lowLimit;
+                                    
+                                    resultArr[i] = realUpLimit;
+                                }
+
+                                return resultArr;
+                            }
+                        });//end xyCal
+                    }//end forY
+                }//end forX
+
+                return imgData;
+
+            }//end process Method
+        };//end M defination
+
+        return M;
+    });
+
+})("psLib");
+/**
+ * @author: Bin Wang
+ * @description: 调整RGB 饱和和度  
+ * H (-2*Math.PI , 2 * Math.PI)  S (-100,100) I (-100,100)
+ * 着色原理  勾选着色后，所有的像素不管之前是什么色相，都变成当前设置的色相，
+ * 然后饱和度变成现在设置的饱和度，但保持明度为原来的基础上加上设置的明度
+ *
+ */
+;(function(Ps){
+
+    window[Ps].module("Alteration.setHSI",function(P){
+
+        var M = {
+            process: function(imgData,arg){//调节亮度对比度
+                arg[0] = arg[0] / 180 * Math.PI;
+                arg[1] = arg[1] / 100 || 0;
+                arg[2] = arg[2] / 100 * 255 || 0;
+                arg[3] = arg[3] || false;//着色
+                
+                //调节通道
+                var channel = arg[4];
+                if(!(/[RGBCMY]+/.test(channel))){
+                    channel = "RGBCMY";
+                }
+                
+                var letters = channel.split("");
+                var indexOf = {};
+
+                for(var i = 0; i < letters.length; i ++){
+                    indexOf[letters[i]] = 1;
+                }
+
+                P.lib.dorsyMath.applyInHSI(imgData,function(i, color){
+                    if(! indexOf[color]) return;
+
+                    if(arg[3]){
+                        i.H = arg[0];
+                        i.S = arg[1];
+                        i.I += arg[2];
+                    }else{
+                        i.H += arg[0];
+                        i.S += arg[1];
+                        i.I += arg[2];
+                    }
+
+                });
 
                 return imgData;
             }
