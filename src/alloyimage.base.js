@@ -180,16 +180,15 @@ try{
             }
         },
 
-        toolkit: function(actMethod){
-            //var actMethod = Array.prototype.shift.call(args);
+        toolkit: function(imgData, args){
+            var actMethod = Array.prototype.shift.call(args);
 
             if(this.lib.ToolKit[actMethod]){
-                return this.lib.ToolKit[actMethod].process();
+                return this.lib.ToolKit[actMethod].process(imgData, args);
             }else{
                 throw new Error("AI_ERROR: 不存在的工具方法_" + actMethod);
             }
         },
-
 
         definePs: function(name, func){
             this.definedPs[name] = func;
@@ -1108,8 +1107,8 @@ try{
 
         //图像的工具箱方法，如钢笔工具，毛笔等。
         //考虑是否支持组合使用？
-        ToolKit:function(actMethod) {
-            P.toolkit(actMethod);
+        ToolKit:function(args) {
+            P.toolkit(this.imgData, arguments);
             return this;
         }
     };

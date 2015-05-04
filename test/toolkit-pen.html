@@ -6,8 +6,11 @@
 </head>
 <body>
 <img id="pic" src="../res/img/2.jpg" alt=""/>
+<canvas height="550px" width="600px">
 
-<div id="m"></div>
+</canvas>
+
+<!--<canvas id='canvas1' width="800px" height="800px"></canvas>-->
 <script type="text/javascript" src="../combined/alloyimage.js"></script>
 <script type="text/javascript">
     window.onload = function () {
@@ -15,6 +18,8 @@
         var img = document.getElementById("pic");
         var ai = $AI(img);
         ai.ToolKit('pen');
+
+
     }
 </script>
 </body>

@@ -16,6 +16,7 @@ function comfiles($filesDir){
 comfiles("../src/module/");
 comfiles("../src/module/filter/");
 comfiles("../src/module/alteration/");
+comfiles("../src/module/toolkit/");
 
 $wfile = fopen("../combined/alloyimage.js","w+");
 if(fwrite($wfile,$contents)){

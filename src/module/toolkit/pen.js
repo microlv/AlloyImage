@@ -9,11 +9,16 @@
 
   window[Ps].module("ToolKit.pen", function (P) {
     return {
-      process: function () {
-        var canvas = this.canvas,
-          hue = 1,
-          flag = 0,
-          context = canvas.getContext('2d');
+      process: function (img) {
+
+        var iw = img.width, ih = img.height,
+          canvas = document.createElement('canvas'),
+          context = canvas.getContext("2d"),
+          hue = 1, flag = 0;
+
+        canvas.width = iw;
+        canvas.height = ih;
+        context.drawImage(img, 0, 0, iw, ih);
 
         canvas.addEventListener('mousemove', onMouseMove, false);
         canvas.addEventListener('mousedown', onMouseDown, false);
@@ -28,6 +33,9 @@
             context.shadowColor = 'white';
             context.shadowBlur = 10;
             context.stroke();
+          }
+          else {
+            context.moveTo(e.layerX, e.layerY);
           }
         }
 
